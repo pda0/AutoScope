@@ -66,7 +66,8 @@ begin
     {$IFDEF CONSOLE_TESTRUNNER}
     Application.Free;
     {$ENDIF}
-  {$ELSE OLD_DELPHI}
+  {$ELSE}
+    ReportMemoryLeaksOnShutdown := True;
     {$IFDEF OLD_DELPHI}
     Application.Initialize;
     if IsConsole then

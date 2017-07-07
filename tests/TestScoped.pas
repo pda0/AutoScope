@@ -28,9 +28,12 @@ uses
 type
   TTestScoped = class(TTestCase)
   private
+    FDelObject: TObject;
     FExCreated, FExDeleted: Integer;
     class function GetMemoryUsed: NativeUInt; static;
     procedure MakeException;
+    procedure MakeConstructorException;
+    procedure MakeDestructorException;
   published
     procedure TestEmpty;
     procedure TestAddObject;
@@ -43,6 +46,8 @@ type
     procedure TestRemoveObject;
     procedure TestRemoveMem;
     procedure TestException;
+    procedure TestConstructorException;
+    procedure TestDestructorException;
   end;
 
 implementation
@@ -52,13 +57,29 @@ uses
 
 type
   TTestObject = class
-  private
+  protected
     FCreated, FDeleted: PInteger;
   public
-    constructor Create(CreatedPtr, DeletedPtr: PInteger);
-    procedure BeforeDestruction; override;
+    constructor Create(CreatedPtr, DeletedPtr: PInteger); virtual;
+    destructor Destroy; override;
     procedure Dummy;
   end;
+
+  TTestCFailObject = class(TTestObject)
+  public
+    constructor Create(CreatedPtr, DeletedPtr: PInteger); override;
+  end;
+
+  TTestDFailObject = class(TTestObject)
+  private
+    FFail: Boolean;
+  public
+    constructor Create(CreatedPtr, DeletedPtr: PInteger); override;
+    destructor Destroy; override;
+    property Fail: Boolean read FFail write FFail;
+  end;
+
+{ TTestObject }
 
 constructor TTestObject.Create(CreatedPtr, DeletedPtr: PInteger);
 begin
@@ -68,7 +89,7 @@ begin
   Inc(FCreated^);
 end;
 
-procedure TTestObject.BeforeDestruction;
+destructor TTestObject.Destroy;
 begin
   if Assigned(FDeleted) then
   begin
@@ -80,6 +101,30 @@ end;
 
 procedure TTestObject.Dummy;
 begin
+end;
+
+{ TTestCFailObject }
+
+constructor TTestCFailObject.Create(CreatedPtr, DeletedPtr: PInteger);
+begin
+  Abort;
+  inherited;
+end;
+
+{ TTestDFailObject }
+
+constructor TTestDFailObject.Create(CreatedPtr, DeletedPtr: PInteger);
+begin
+  inherited;
+  FFail := True;
+end;
+
+destructor TTestDFailObject.Destroy;
+begin
+  if FFail then
+    Abort;
+
+  inherited;
 end;
 
 { TTestScoped }
@@ -369,6 +414,61 @@ begin
   CheckException(MakeException, EAbort);
 
   CheckEquals(3, FExCreated);
+  CheckEquals(3, FExDeleted);
+end;
+
+procedure TTestScoped.MakeConstructorException;
+var
+  Scoped: TScoped;
+  T1, T2: TTestObject;
+begin
+  T1 := Scoped[TTestObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+  T2 := Scoped[TTestCFailObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+
+  T1.Dummy;
+  T2.Dummy;
+end;
+
+procedure TTestScoped.TestConstructorException;
+begin
+  FExCreated := 0;
+  FExDeleted := 0;
+
+  CheckException(MakeConstructorException, EAbort);
+
+  CheckEquals(1, FExCreated);
+  CheckEquals(1, FExDeleted);
+end;
+
+procedure TTestScoped.MakeDestructorException;
+var
+  Scoped: TScoped;
+  T1, T2, T3: TTestObject;
+begin
+  T1 := Scoped[TTestObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+  T2 := Scoped[TTestDFailObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+  T3 := Scoped[TTestObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+
+  FDelObject := T2;
+
+  T1.Dummy;
+  T2.Dummy;
+  T3.Dummy;
+end;
+
+procedure TTestScoped.TestDestructorException;
+begin
+  FExCreated := 0;
+  FExDeleted := 0;
+
+  CheckException(MakeDestructorException, EAbort);
+
+  CheckEquals(3, FExCreated);
+  CheckEquals(2, FExDeleted);
+
+  (FDelObject as TTestDFailObject).Fail := False;
+  FDelObject.Free;
+
   CheckEquals(3, FExDeleted);
 end;
 

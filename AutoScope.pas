@@ -8,6 +8,16 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
+    https://github.com/pda0/AutoScope
+
+    Ver 1.0.1
+    * Now cleanup process is protected from destructor's exceptions.
+      It may not work temporarily in llvm-based compiler because of the bug
+      https://quality.embarcadero.com/browse/RSP-18031
+
+    Ver 1.0.0
+    * Initial release.
+
  **********************************************************************}
 unit AutoScope;
 {$IFDEF FPC}
@@ -25,8 +35,8 @@ interface
     {$IFDEF VER2_0}{$ERROR Too old compiller.}{$ENDIF}
     {$IFDEF VER2_2}{$ERROR Too old compiller.}{$ENDIF}
     {$IFDEF VER2_4}{$ERROR Too old compiller.}{$ENDIF}
-    {$DEFINE USE_INTERFACE}
   {$ENDIF}
+  {$DEFINE USE_INTERFACE}
   {$IFNDEF VER_3_0}
     {$IFDEF USE_INTERFACE}{$UNDEF USE_INTERFACE}{$ENDIF}
     {$DEFINE USE_OPERATORS}
@@ -189,6 +199,9 @@ type
 
 implementation
 
+uses
+  SysUtils;
+
 { TScoped }
 
 {$IFDEF USE_INTERFACE}
@@ -200,9 +213,13 @@ end;
 
 destructor TScoped.TScopedGuardian.Destroy;
 begin
-  TScoped.Finalize(FScopedRec^);
-
   inherited;
+  try
+    TScoped.Finalize(FScopedRec^);
+  except
+    FreeInstance;
+    raise;
+  end;
 end;
 {$ENDIF}
 
@@ -224,19 +241,35 @@ class operator TScoped.Finalize(var AScope: TScoped);
 class procedure TScoped.Finalize(var AScope: TScoped);
 {$ENDIF}
 var
+  {$IFNDEF NEXTGEN}
+  FirstException: Pointer;
+  {$ENDIF}
   i: {$IFDEF FPC}TDynArrayIndex{$ELSE}Integer{$ENDIF};
 begin
+  FirstException := nil;
+
   for i := AScope.FLastIndex downto 0 do
-    {$IFNDEF NEXTGEN}
+  {$IFNDEF NEXTGEN}
+  try
     if AScope.FPointers[i].IsObject then
       TObject(AScope.FPointers[i].Ptr).Free
     else begin
-    {$ENDIF}
+  {$ENDIF}
       if Assigned(AScope.FPointers[i].Ptr) then
         System.FreeMem(AScope.FPointers[i].Ptr);
-    {$IFNDEF NEXTGEN}
+  {$IFNDEF NEXTGEN}
     end;
-    {$ENDIF}
+  except
+    if not Assigned(FirstException) then
+      FirstException := AcquireExceptionObject;
+  end;
+
+  if Assigned(FirstException) then
+  begin
+    SetLength(AScope.FPointers, 0);
+    raise TObject(FirstException);
+  end;
+  {$ENDIF}
 end;
 
 { TScoped is for small amount of local objects or memory blocks, which will be
