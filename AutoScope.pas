@@ -217,9 +217,6 @@ var
 
 implementation
 
-uses
-  SysUtils;
-
 { TScoped }
 
 {$IFDEF USE_INTERFACE}
