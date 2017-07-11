@@ -28,12 +28,13 @@ uses
 type
   TTestScoped = class(TTestCase)
   private
-    FDelObject: TObject;
+    FExObject: TObject;
     FExCreated, FExDeleted: Integer;
     class function GetMemoryUsed: NativeUInt; static;
     procedure MakeException;
     procedure MakeConstructorException;
     procedure MakeDestructorException;
+    procedure SolveHanoi;
   published
     procedure TestEmpty;
     procedure TestAddObject;
@@ -48,12 +49,16 @@ type
     procedure TestException;
     procedure TestConstructorException;
     procedure TestDestructorException;
+    procedure TestHanoi;
   end;
 
 implementation
 
 uses
-  SysUtils;
+  Classes, SysUtils;
+
+const
+  MAX_DISCS = 5;
 
 type
   TTestObject = class
@@ -77,6 +82,33 @@ type
     constructor Create(CreatedPtr, DeletedPtr: PInteger); override;
     destructor Destroy; override;
     property Fail: Boolean read FFail write FFail;
+  end;
+
+  IRenderer = Interface
+    procedure RenderLine(AnStr: string);
+  end;
+
+  TPegs = (FirstPeg, SecondPeg, ThirdPeg);
+
+  TPeg = record
+    Discs: array [0 .. MAX_DISCS - 1] of Integer;
+    Count: Integer;
+    procedure MoveTopDisc(var DestPeg: TPeg);
+    function RenderLine(Line: Integer): string;
+  end;
+
+  TTowers = record
+    Pegs: array [TPegs] of TPeg;
+    procedure Init;
+    procedure Render(Rendered: IRenderer);
+  end;
+
+  TRenderer = class(TInterfacedObject, IRenderer)
+  private
+    FStrings: TStrings;
+  public
+    constructor Create(const Strings: TStrings);
+    procedure RenderLine(AnStr: string);
   end;
 
 { TTestObject }
@@ -125,6 +157,81 @@ begin
     Abort;
 
   inherited;
+end;
+
+{ TPeg }
+
+procedure TPeg.MoveTopDisc(var DestPeg: TPeg);
+begin
+  Dec(Count);
+  DestPeg.Discs[DestPeg.Count] := Discs[Count];
+  Discs[Count] := 0;
+  Inc(DestPeg.Count);
+end;
+
+function TPeg.RenderLine(Line: Integer): string;
+var
+  TowerWidth, RingWidth, Spaces: Integer;
+begin
+  TowerWidth := 3 + 2 * (MAX_DISCS - 1);
+
+  if Line >= MAX_DISCS then
+    RingWidth := 1
+  else
+    RingWidth := 1 + 2 * Discs[Line];
+
+  Spaces := (TowerWidth - RingWidth) div 2;
+
+  if RingWidth = 1 then
+    Result := '#'
+  else
+    Result := StringOfChar('@', RingWidth);
+
+  Result := StringOfChar(' ', Spaces) + Result + StringOfChar(' ', Spaces);
+end;
+
+{ TTowers }
+procedure TTowers.Init;
+var
+  i: Integer;
+begin
+  Pegs[FirstPeg].Count  := MAX_DISCS;
+  Pegs[SecondPeg].Count := 0;
+  Pegs[ThirdPeg].Count  := 0;
+  for i := 0 to MAX_DISCS - 1 do
+  begin
+    Pegs[FirstPeg].Discs[i]  := MAX_DISCS - i;
+    Pegs[SecondPeg].Discs[i] := 0;
+    Pegs[ThirdPeg].Discs[i]  := 0;
+  end;
+end;
+
+{ TRenderer }
+
+constructor TRenderer.Create(const Strings: TStrings);
+begin
+  FStrings := Strings;
+end;
+
+procedure TRenderer.RenderLine(AnStr: string);
+begin
+  FStrings.Append(AnStr);
+end;
+
+procedure TTowers.Render(Rendered: IRenderer);
+var
+  PegLine: string;
+  Line: Integer;
+  Peg: TPegs;
+begin
+  Rendered.RenderLine('');
+  for Line := MAX_DISCS downto 0 do
+  begin
+    PegLine := '';
+    for Peg := Low(Pegs) to High(Pegs) do
+      PegLine := PegLine + Pegs[Peg].RenderLine(Line);
+    Rendered.RenderLine(PegLine);
+  end;
 end;
 
 { TTestScoped }
@@ -353,6 +460,7 @@ var
 begin
   CreatedCounter := 0;
   DeletedCounter := 0;
+  T2 := nil;
 
   ScopedTest;
   CheckEquals(3, CreatedCounter);
@@ -378,6 +486,7 @@ var
     Scoped.RemoveMem(P2);
   end;
 begin
+  P2 := nil;
   Mem1 := GetMemoryUsed;
   ScopedTest;
   Mem2 := GetMemoryUsed;
@@ -449,7 +558,7 @@ begin
   T2 := Scoped[TTestDFailObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
   T3 := Scoped[TTestObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
 
-  FDelObject := T2;
+  FExObject := T2;
 
   T1.Dummy;
   T2.Dummy;
@@ -466,10 +575,90 @@ begin
   CheckEquals(3, FExCreated);
   CheckEquals(2, FExDeleted);
 
-  (FDelObject as TTestDFailObject).Fail := False;
-  FDelObject.Free;
+  (FExObject as TTestDFailObject).Fail := False;
+  FExObject.Free;
 
   CheckEquals(3, FExDeleted);
+end;
+
+{ The solution to the `Tower of Hanoi' puzzle is used to get a large enough and
+  complex code to make sure that the compiler does not remove Scoped ahead of
+  time. }
+procedure TTestScoped.SolveHanoi;
+var
+  Scoped: TScoped;
+  Towers: TTowers;
+  Solution: TStrings;
+  Renderer: IRenderer;
+  T: TTestObject;
+
+  procedure MoveStack(Amount: Integer; SrcPeg, DestPeg: TPegs);
+  var
+    Scoped: TScoped;
+    Renderer: IRenderer;
+    T2: TTestObject;
+    FreePeg: TPegs;
+    CreatedCounter, DeletedCounter: Integer;
+  begin
+    FreePeg := FirstPeg;
+    CreatedCounter := 0;
+    DeletedCounter := 0;
+    T2 := Scoped[TTestObject.Create(@CreatedCounter, @DeletedCounter)] as TTestObject;
+    T2.Dummy;
+
+    if Amount > 0 then
+    begin
+      Renderer := TRenderer.Create(Solution);
+      Dec(Amount);
+
+      case SrcPeg of
+        FirstPeg:
+          if DestPeg = SecondPeg then
+            FreePeg := ThirdPeg
+          else
+            FreePeg := SecondPeg;
+        SecondPeg:
+          if DestPeg = ThirdPeg then
+            FreePeg := FirstPeg
+          else
+            FreePeg := ThirdPeg;
+        ThirdPeg:
+          if DestPeg = FirstPeg then
+            FreePeg := SecondPeg
+          else
+            FreePeg := FirstPeg;
+      end;
+
+      MoveStack(Amount, SrcPeg, FreePeg);
+      Towers.Pegs[SrcPeg].MoveTopDisc(Towers.Pegs[DestPeg]);
+      Towers.Render(Renderer);
+      MoveStack(Amount, FreePeg, DestPeg);
+    end;
+
+    CheckEquals(1, CreatedCounter);
+    CheckEquals(0, DeletedCounter);
+  end;
+begin
+  T := Scoped[TTestObject.Create(@FExCreated, @FExDeleted)] as TTestObject;
+  Solution := Scoped[TStringList.Create] as TStringList;
+  T.Dummy;
+
+  Renderer := TRenderer.Create(Solution);
+  Towers.Init;
+  Towers.Render(Renderer);
+  MoveStack(MAX_DISCS, FirstPeg, SecondPeg);
+  CheckEquals(0, FExDeleted);
+end;
+
+procedure TTestScoped.TestHanoi;
+begin
+  FExCreated := 0;
+  FExDeleted := 0;
+
+  SolveHanoi;
+
+  CheckEquals(1, FExCreated);
+  CheckEquals(1, FExDeleted);
 end;
 
 initialization

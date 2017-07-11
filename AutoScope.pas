@@ -10,6 +10,12 @@
 
     https://github.com/pda0/AutoScope
 
+    Ver 1.0.2
+    + Added some new tests.
+    + Added `paranoia' mode (disabled by default). Define WITH_PARANOIA if you
+      want. TScoped will place a reference to itself in an external variable to
+      prevent too smart compiler from removing the record prematurely.
+
     Ver 1.0.1
     * Now cleanup process is protected from destructor's exceptions.
       It may not work temporarily in llvm-based compiler because of the bug
@@ -53,6 +59,13 @@ type
     {$ENDIF}
   end;
   {$IFDEF USE_INTERFACE}
+    {$DEFINE NEED_SCOPED_PTR}
+  {$ENDIF}
+  {$IFDEF WITH_PARANOIA}
+    {$IFNDEF NEED_SCOPED_PTR}{$DEFINE NEED_SCOPED_PTR}{$ENDIF}
+  {$ENDIF}
+
+  {$IFDEF NEED_SCOPED_PTR}
   PScoped = ^TScoped;
   {$ENDIF}
 
@@ -197,6 +210,11 @@ type
     property Objects[const AnObject: TObject]: TObject read AddObject; default;
   end;
 
+{$IFDEF WITH_PARANOIA}
+var
+  __no_use_ptr: PScoped;
+{$ENDIF}
+
 implementation
 
 uses
@@ -230,6 +248,9 @@ class operator TScoped.Initialize(var AScope: TScoped);
 class procedure TScoped.Initialize(var AScope: TScoped);
 {$ENDIF}
 begin
+  {$IFDEF WITH_PARANOIA}
+   __no_use_ptr := @AScope;
+  {$ENDIF}
   AScope.FLastIndex := -1;
   SetLength(AScope.FPointers, 16);
 end;
